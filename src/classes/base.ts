@@ -39,6 +39,7 @@ const dumpObject = (obj: any): any => {
 
 export abstract class AssetBase {
   abstract readonly type: AssetType;
+  readonly reader: ArrayBufferReader;
   readonly name: string;
 
   constructor(
@@ -46,6 +47,7 @@ export abstract class AssetBase {
     r: ArrayBufferReader,
   ) {
     r.seek(__info.bytesStart);
+    this.reader = r;
     this.name = r.readAlignedString();
   }
 
@@ -72,5 +74,69 @@ export abstract class AssetBase {
       console.error(`Dump ${this.__class} error:`, error);
       return {};
     }
+  }
+
+  typeTree() {
+    const methods: Record<string, string> = {
+      int: 'Int32',
+      string: 'AlignedString',
+      float: 'Float32',
+    };
+
+    function remap(method: string) {
+      method = method.replace('SInt', 'Int');
+      return methods[method] ?? method;
+    }
+
+    const reader = this.reader.clone();
+    reader.seek(this.__info.bytesStart);
+    const nodes = this.__info.tree;
+    let index = 0;
+    function readObject(): Record<string, unknown> {
+      const initialLevel = nodes[index].level;
+      const object: Record<string, unknown> = {};
+      while (index < nodes.length) {
+        const node = nodes[index];
+        if (node.level <= initialLevel - 1) break;
+
+        index++;
+        const nextNode = nodes[index];
+        if (nextNode && nextNode.level > node.level && node.typeStr !== 'string') {
+          if (nextNode.typeStr === 'Array') {
+            const array = [];
+            const length = reader.readUInt32();
+            if (length !== 0) {
+              index += 2; // skip Array and size
+              const startIndex = index;
+              for (let j = 0; j < length; j++) {
+                index = startIndex;
+                array.push(readObject().data);
+              }
+            } else {
+              // Skip everything until the next field
+              while (index < nodes.length && nodes[index].level > node.level) {
+                index++;
+              }
+            }
+
+            object[node.nameStr] = array;
+          } else {
+            object[node.nameStr] = readObject();
+          }
+        } else {
+          // @ts-expect-error
+          object[node.nameStr] = reader[`read${remap(node.typeStr)}`]();
+          reader.align(4);
+
+          if (node.typeStr === 'string') {
+            index += 3; // skip string (Array, size, data)
+          }
+        }
+      }
+
+      return object;
+    }
+
+    return readObject().Base as Record<string, unknown>;
   }
 }

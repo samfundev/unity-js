@@ -18,7 +18,8 @@
   "scripts": {
     "build": "rimraf dist && tsc",
     "lint:fix": "eslint . --ext .ts --fix",
-    "postversion": "tpv"
+    "postversion": "tpv",
+    "prepare": "yarn run build"
   },
   "dependencies": {
     "@arkntools/unity-js-tools": "^3.2.0",
